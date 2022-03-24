@@ -33,9 +33,16 @@ static char *ngx_http_modsecurity_merge_conf(ngx_conf_t *cf, void *parent, void 
 static void ngx_http_modsecurity_cleanup_instance(void *data);
 static void ngx_http_modsecurity_cleanup_rules(void *data);
 
-static ngx_int_t ngx_http_modsecurity_variable(
-    ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data);
-
+static ngx_int_t ngx_http_modsecurity_req_headers_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_modsecurity_req_body_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_modsecurity_resp_headers_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_modsecurity_resp_body_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_modsecurity_time_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data, ngx_msec_int_t usec);
 
 /*
  * PCRE malloc/free workaround, based on
@@ -271,6 +278,11 @@ ngx_http_modsecurity_create_ctx(ngx_http_request_t *r)
         dd("failed to allocate memory for the context.");
         return NULL;
     }
+
+    ctx->req_headers_phase_time = -1;
+    ctx->req_body_phase_time = -1;
+    ctx->resp_headers_phase_time = -1;
+    ctx->resp_body_phase_time = -1;
 
     mmcf = ngx_http_get_module_main_conf(r, ngx_http_modsecurity_module);
     mcf = ngx_http_get_module_loc_conf(r, ngx_http_modsecurity_module);
@@ -525,8 +537,20 @@ ngx_module_t ngx_http_modsecurity_module = {
 
 
 static ngx_http_variable_t  ngx_http_modsecurity_vars[] = {
-    { ngx_string("modsecurity_time"), NULL,
-      ngx_http_modsecurity_variable, 0,
+    { ngx_string("modsecurity_req_headers_phase_time"), NULL,
+      ngx_http_modsecurity_req_headers_phase_time, 0,
+      NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+    { ngx_string("modsecurity_req_body_phase_time"), NULL,
+      ngx_http_modsecurity_req_body_phase_time, 0,
+      NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+    { ngx_string("modsecurity_resp_headers_phase_time"), NULL,
+      ngx_http_modsecurity_resp_headers_phase_time, 0,
+      NGX_HTTP_VAR_NOCACHEABLE, 0 },
+    
+    { ngx_string("modsecurity_resp_body_phase_time"), NULL,
+      ngx_http_modsecurity_resp_body_phase_time, 0,
       NGX_HTTP_VAR_NOCACHEABLE, 0 },
 
       ngx_http_null_variable
@@ -819,20 +843,77 @@ ngx_http_modsecurity_cleanup_rules(void *data)
 
 
 static ngx_int_t
-ngx_http_modsecurity_variable(ngx_http_request_t *r,
+ngx_http_modsecurity_req_headers_phase_time(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-// ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Hello from modsecurity_variable");
+    ngx_http_modsecurity_ctx_t *ctx;
 
+    ctx = ngx_http_get_module_ctx(r, ngx_http_modsecurity_module);
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+    return ngx_http_modsecurity_time_variable(r, v, data, ctx->req_headers_phase_time);
+}
+
+
+static ngx_int_t
+ngx_http_modsecurity_req_body_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    ngx_http_modsecurity_ctx_t *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_modsecurity_module);
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+    return ngx_http_modsecurity_time_variable(r, v, data, ctx->req_body_phase_time);
+}
+
+
+static ngx_int_t
+ngx_http_modsecurity_resp_headers_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    ngx_http_modsecurity_ctx_t *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_modsecurity_module);
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+    return ngx_http_modsecurity_time_variable(r, v, data, ctx->resp_headers_phase_time);
+}
+
+
+static ngx_int_t
+ngx_http_modsecurity_resp_body_phase_time(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    ngx_http_modsecurity_ctx_t *ctx;
+
+    ctx = ngx_http_get_module_ctx(r, ngx_http_modsecurity_module);
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+    return ngx_http_modsecurity_time_variable(r, v, data, ctx->resp_body_phase_time);
+}
+
+static ngx_int_t
+ngx_http_modsecurity_time_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data, ngx_msec_int_t usec)
+{
     u_char  *p;
-    char    *ass = "ass";
 
-    p = ngx_pnalloc(r->pool, NGX_ATOMIC_T_LEN);
+    p = ngx_pnalloc(r->pool, NGX_TIME_T_LEN + 7);
     if (p == NULL) {
         return NGX_ERROR;
     }
 
-    v->len = ngx_sprintf(p, "%s", ass) - p;
+    if(usec == -1) {
+        v->len = ngx_sprintf(p, "-") - p;
+    } else  {
+        v->len = ngx_sprintf(p, "%T.%06M", (time_t) usec / 1000000, usec % 1000000) - p;
+    }
+
     v->valid = 1;
     v->no_cacheable = 0;
     v->not_found = 0;
@@ -840,5 +921,13 @@ ngx_http_modsecurity_variable(ngx_http_request_t *r,
 
     return NGX_OK;
 }
+
+
+ngx_msec_int_t
+ngx_http_modsecurity_compute_processing_time(struct timeval tv) {
+    struct timeval current_tv;
+    ngx_gettimeofday(&current_tv);
+    return (ngx_msec_int_t) ((current_tv.tv_sec - tv.tv_sec) * 1000000 + (current_tv.tv_usec - tv.tv_usec));
+};
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */

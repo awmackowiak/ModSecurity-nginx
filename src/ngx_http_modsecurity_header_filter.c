@@ -532,12 +532,7 @@ ngx_http_modsecurity_header_filter(ngx_http_request_t *r)
     ngx_http_modsecurity_pcre_malloc_done(old_pool);
     ret = ngx_http_modsecurity_process_intervention(ctx->modsec_transaction, r, 0);
     
-    struct timeval stop_tv;
-    ngx_gettimeofday(&stop_tv);
-    ngx_msec_int_t ms;
-    ms = (ngx_msec_int_t) ((stop_tv.tv_sec - start_tv.tv_sec) * 1000000 + (stop_tv.tv_usec - start_tv.tv_usec));
-    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "PHASE 3 PROCESSING TIME: %T.%06M", 
-        (time_t) ms / 1000000, ms % 1000000);
+    ctx->resp_headers_phase_time = ngx_http_modsecurity_compute_processing_time(start_tv);
 
     if (r->error_page) {
         return ngx_http_next_header_filter(r);
