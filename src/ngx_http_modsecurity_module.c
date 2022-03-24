@@ -25,12 +25,16 @@
 #include <ngx_http.h>
 
 static ngx_int_t ngx_http_modsecurity_init(ngx_conf_t *cf);
+static ngx_int_t ngx_http_modsecurity_add_variables(ngx_conf_t *cf);
 static void *ngx_http_modsecurity_create_main_conf(ngx_conf_t *cf);
 static char *ngx_http_modsecurity_init_main_conf(ngx_conf_t *cf, void *conf);
 static void *ngx_http_modsecurity_create_conf(ngx_conf_t *cf);
 static char *ngx_http_modsecurity_merge_conf(ngx_conf_t *cf, void *parent, void *child);
 static void ngx_http_modsecurity_cleanup_instance(void *data);
 static void ngx_http_modsecurity_cleanup_rules(void *data);
+
+static ngx_int_t ngx_http_modsecurity_variable(
+    ngx_http_request_t *r, ngx_http_variable_value_t *v, uintptr_t data);
 
 
 /*
@@ -490,7 +494,7 @@ static ngx_command_t ngx_http_modsecurity_commands[] =  {
 
 
 static ngx_http_module_t ngx_http_modsecurity_ctx = {
-    NULL,                                  /* preconfiguration */
+    ngx_http_modsecurity_add_variables,    /* preconfiguration */
     ngx_http_modsecurity_init,             /* postconfiguration */
 
     ngx_http_modsecurity_create_main_conf, /* create main configuration */
@@ -517,6 +521,15 @@ ngx_module_t ngx_http_modsecurity_module = {
     NULL,                                  /* exit process */
     NULL,                                  /* exit master */
     NGX_MODULE_V1_PADDING
+};
+
+
+static ngx_http_variable_t  ngx_http_modsecurity_vars[] = {
+    { ngx_string("modsecurity_time"), NULL,
+      ngx_http_modsecurity_variable, 0,
+      NGX_HTTP_VAR_NOCACHEABLE, 0 },
+
+      ngx_http_null_variable
 };
 
 
@@ -595,6 +608,23 @@ ngx_http_modsecurity_init(ngx_conf_t *cf)
 
     return NGX_OK;
 }
+
+static ngx_int_t
+ngx_http_modsecurity_add_variables(ngx_conf_t *cf) {
+    ngx_http_variable_t  *var, *v;
+
+    for (v = ngx_http_modsecurity_vars; v->name.len; v++) {
+        var = ngx_http_add_variable(cf, &v->name, v->flags);
+        if (var == NULL) {
+            return NGX_ERROR;
+        }
+
+        var->get_handler = v->get_handler;
+        var->data = v->data;
+    }
+
+    return NGX_OK;
+};
 
 
 static void *
@@ -787,5 +817,28 @@ ngx_http_modsecurity_cleanup_rules(void *data)
     ngx_http_modsecurity_pcre_malloc_done(old_pool);
 }
 
+
+static ngx_int_t
+ngx_http_modsecurity_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+// ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "Hello from modsecurity_variable");
+
+    u_char  *p;
+    char    *ass = "ass";
+
+    p = ngx_pnalloc(r->pool, NGX_ATOMIC_T_LEN);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+
+    v->len = ngx_sprintf(p, "%s", ass) - p;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = p;
+
+    return NGX_OK;
+}
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */

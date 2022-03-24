@@ -50,7 +50,10 @@ ngx_http_modsecurity_rewrite_handler(ngx_http_request_t *r)
 
     if (ctx == NULL)
     {
-        int ret = 0;
+        int ret =      0;
+        struct timeval start_tv;
+
+        ngx_gettimeofday(&start_tv);
 
         ngx_connection_t *connection = r->connection;
         /**
@@ -206,6 +209,14 @@ ngx_http_modsecurity_rewrite_handler(ngx_http_request_t *r)
         ngx_http_modsecurity_pcre_malloc_done(old_pool);
         dd("Processing intervention with the request headers information filled in");
         ret = ngx_http_modsecurity_process_intervention(ctx->modsec_transaction, r, 1);
+
+        struct timeval stop_tv;
+        ngx_gettimeofday(&stop_tv);
+        ngx_msec_int_t ms;
+        ms = (ngx_msec_int_t) ((stop_tv.tv_sec - start_tv.tv_sec) * 1000000 + (stop_tv.tv_usec - start_tv.tv_usec));
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "PHASE 1 PROCESSING TIME: %T.%06M", 
+            (time_t) ms / 1000000, ms % 1000000);
+        
         if (r->error_page) {
             return NGX_DECLINED;
             }
@@ -214,7 +225,6 @@ ngx_http_modsecurity_rewrite_handler(ngx_http_request_t *r)
             return ret;
         }
     }
-
 
     return NGX_DECLINED;
 }

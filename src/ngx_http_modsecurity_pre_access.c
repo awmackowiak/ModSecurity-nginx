@@ -140,6 +140,9 @@ ngx_http_modsecurity_pre_access_handler(ngx_http_request_t *r)
         int ret = 0;
         int already_inspected = 0;
 
+        struct timeval start_tv;
+        ngx_gettimeofday(&start_tv);
+
         dd("request body is ready to be processed");
 
         r->write_event_handler = ngx_http_core_run_phases;
@@ -209,7 +212,16 @@ ngx_http_modsecurity_pre_access_handler(ngx_http_request_t *r)
 /* XXX: once more -- is body can be modified ?  content-length need to be adjusted ? */
 
         old_pool = ngx_http_modsecurity_pcre_malloc_init(r->pool);
+
         msc_process_request_body(ctx->modsec_transaction);
+
+        struct timeval stop_tv;
+        ngx_gettimeofday(&stop_tv);
+        ngx_msec_int_t ms;
+        ms = (ngx_msec_int_t) ((stop_tv.tv_sec - start_tv.tv_sec) * 1000000 + (stop_tv.tv_usec - start_tv.tv_usec));
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "PHASE 2 PROCESSING TIME: %T.%06M", 
+            (time_t) ms / 1000000, ms % 1000000);
+
         ngx_http_modsecurity_pcre_malloc_done(old_pool);
 
         ret = ngx_http_modsecurity_process_intervention(ctx->modsec_transaction, r, 0);
